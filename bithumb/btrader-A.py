@@ -24,7 +24,7 @@ MIN_ORDERS = {"BTC": 0.001, "ETH": 0.01, "DASH": 0.01, "LTC": 0.01, "ETC": 0.1, 
 INTERVAL = 1                                        # 매수 시도 interval (1초 기본)
 DEBUG = False                                      # True: 매매 API 호출 안됨, False: 실제로 매매 API 호출
 
-COIN_NUMS = 15                                      # 분산 투자 코인 개수 (자산/COIN_NUMS를 각 코인에 투자)
+COIN_NUMS = 10                                      # 분산 투자 코인 개수 (자산/COIN_NUMS를 각 코인에 투자)
 LARRY_K = 0.5
 
 GAIN = 0.3                                          # 30% 이상 이익시 50% 물량 익절
@@ -398,9 +398,14 @@ sell_time1, sell_time2 = make_sell_times(now)                           # 초기
 setup_time1, setup_time2 = make_setup_times(now)                        # 초기 셋업 시간 설정
 
 tickers = pybithumb.get_tickers()                                       # 티커 리스트 얻기
+tickers.remove('date')
 
-noises = cal_noise(tickers)
-targets = inquiry_targets(tickers)                                      # 코인별 목표가 계산
+noises = None
+while noises is None:
+    noises = cal_noise(tickers)
+targets = None
+while targets is None:
+    targets = inquiry_targets(tickers)                                      # 코인별 목표가 계산
 mas = inquiry_moving_average(tickers)                                   # 코인별로 5일 이동평균 계산
 budget_per_coin = cal_budget()                                          # 코인별 최대 배팅 금액 계산
 
@@ -419,10 +424,15 @@ while True:
     # 새로운 거래일에 대한 데이터 셋업 (00:01:00 ~ 00:01:10)
     if setup_time1 < now < setup_time2:
         tickers = pybithumb.get_tickers()                                   # 티커 목록 갱신
+        tickers.remove('date')
         try_sell(tickers)                                                   # 매도 되지 않은 코인에 대해서 한 번 더 매도 시도
 
-        noises = cal_noise(tickers)
-        targets = inquiry_targets(tickers)                                  # 목표가 갱신
+        noises = None
+        while noises is None:
+            noises = cal_noise(tickers)
+        targets = None
+        while targets is None:
+            targets = inquiry_targets(tickers)                                  # 목표가 갱신
         mas = inquiry_moving_average(tickers)                               # 이동평균 갱신
         budget_per_coin = cal_budget()                                      # 코인별 최대 배팅 금액 계산
 
