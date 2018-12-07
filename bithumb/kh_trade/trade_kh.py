@@ -103,8 +103,22 @@ def inquiry_cur_prices(tickers):
         logger.info("inquiry_cur_prices error: {}".format(e))
         return None
 
-    
-def check_ticker(tickers):
+
+def get_tickers():
+    tickers = pybithumb.get_tickers()
+    try:
+        tickers.remove('date')
+    except:
+        pass
+    try:
+        tickers.remove('TRUE')
+    except:
+        pass
+    try:
+        tickers.remove('FALSE')
+    except:
+        pass
+
     try:
         for ticker in tickers:
             df = pybithumb.get_ohlcv(ticker)
@@ -112,6 +126,9 @@ def check_ticker(tickers):
                 tickers.remove(ticker)
     except Exception as e:
         logger.info("ticker error : {}".format(e))
+        
+    return tickers
+
 
 def cal_noise(tickers, window=20):
     '''
@@ -271,8 +288,10 @@ def try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, hi
                     sell_price = asks[0]['price']
                     buy_ratio = cal_buy_ratio(ticker, targets[ticker], yesterday_diff[ticker], sell_price)
                     unit = (budget_per_coin / float(sell_price)) * buy_ratio
+                    min_order = MIN_ORDERS.get(ticker, 0.001)
+                    
                     if unit >= min_order:
-                        logger.info("BUY [{}] {} {} - MIN : {}".format(now.strftime("%Y-%m-%d %H:%M:%S"), ticker, unit, MIN_ORDERS.get(ticker, 0.001)))
+                        logger.info("BUY [{}] {} {} - MIN : {}".format(now.strftime("%Y-%m-%d %H:%M:%S"), ticker, unit, min_order))
                         if DEBUG is False:
                             bithumb.buy_market_order(ticker, unit)
                         else:
@@ -423,6 +442,22 @@ def print_status(now, tickers, targets, holdings):
     except Exception as e:
         logger.info("print_status error: {}".format(e))
         pass
+        
+
+def set_trade():
+    noises = None
+    while noises is None:
+        noises = cal_noise(tickers)
+    targets = None
+    yesterday_diff = None
+    while targets is None:
+        targets, yesterday_diff = inquiry_targets(tickers, noises)          # 코인별 목표가 계산
+    mas = inquiry_moving_average(tickers)                                   # 코인별로 5일 이동평균 계산
+    budget_per_coin = cal_budget()                                          # 코인별 최대 배팅 금액 계산
+    
+    holdings = {ticker:False for ticker in tickers}                       # 보유 상태 초기화
+    
+    return noises, targets, yesterday_diff, mas, budget_per_coin, holdings
 
 
 #----------------------------------------------------------------------------------------------------------------------
@@ -432,31 +467,9 @@ now = datetime.datetime.now()                                           # 현재
 sell_time1, sell_time2 = make_sell_times(now)                           # 초기 매도 시간 설정
 setup_time1, setup_time2 = make_setup_times(now)                        # 초기 셋업 시간 설정
 
-tickers = pybithumb.get_tickers()                                       # 티커 리스트 얻기
-try:
-    tickers.remove('date')
-except:
-    pass
-try:
-    tickers.remove('TRUE')
-except:
-    pass
-try:
-    tickers.remove('FALSE')
-except:
-    pass
-check_ticker(tickers)
+tickers = get_tickers()                                       # 티커 리스트 얻기
 
-noises = None
-while noises is None:
-    noises = cal_noise(tickers)
-targets = None
-while targets is None:                           
-    targets, yesterday_diff = inquiry_targets(tickers, noises)          # 코인별 목표가 계산
-mas = inquiry_moving_average(tickers)                                   # 코인별로 5일 이동평균 계산
-budget_per_coin = cal_budget()                                          # 코인별 최대 배팅 금액 계산
-
-holdings = {ticker:False for ticker in tickers}                       # 보유 상태 초기화
+noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade()
 high_prices = inquiry_high_prices(tickers)                              # 코인별 당일 고가 저장
 
 while True:
@@ -470,39 +483,20 @@ while True:
 
     # 새로운 거래일에 대한 데이터 셋업 (00:01:00 ~ 00:01:10)
     if setup_time1 < now < setup_time2:
-        tickers = pybithumb.get_tickers()                                   # 티커 목록 갱신
-        try:
-            tickers.remove('date')
-        except:
-            pass
-        try:
-            tickers.remove('TRUE')
-        except:
-            pass
-        try:
-            tickers.remove('FALSE')
-        except:
-            pass
-        check_ticker(tickers)
+        tickers = get_tickers()                                   # 티커 목록 갱신
+
         try_sell(tickers)                                                   # 매도 되지 않은 코인에 대해서 한 번 더 매도 시도
 
-        noises = None
-        while noises is None:
-            noises = cal_noise(tickers)
-        targets = None
-        while targets is None:
-            targets, yesterday_diff = inquiry_targets(tickers, noises)                                  # 목표가 갱신
-        mas = inquiry_moving_average(tickers)                               # 이동평균 갱신
-        budget_per_coin = cal_budget()                                      # 코인별 최대 배팅 금액 계산
+        noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade()
 
         sell_time1, sell_time2 = make_sell_times(now)                       # 당일 매도 시간 갱신
         setup_time1, setup_time2 = make_setup_times(now)                    # 다음 거래일 셋업 시간 갱신
 
-        holdings = {ticker:False for ticker in tickers}                   # 모든 코인에 대한 보유 상태 초기화
         high_prices = {ticker: 0 for ticker in tickers}                    # 코인별 당일 고가 초기화
 
         # 거래 코인수 읽어오기 - 동적변화를 위함
-        # 추후 자산량 변화에 따라 자동으로 변화하도록 로직 구현 (자산이 많아지면 코인종류를 늘려 코인별 비중 축소)
+        # 추후 자산량 변화에 따라 자동으로 변화하도록 로직 구현 
+        # (자산이 많아지면 코인종류를 늘려 코인별 비중 축소)
         try:
             with open("flag/coinnum.txt") as c:
                 lines = c.readlines()
