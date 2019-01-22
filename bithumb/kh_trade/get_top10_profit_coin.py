@@ -4,7 +4,9 @@ import numpy as np
 
 def run_volatility_breakout(ticker):
     df = pybithumb.get_ohlcv(ticker)
-    df = df['2018']                                                 # 일봉 중 2018년도
+#    df = df['2018']                                                 # 일봉 중 2018년도
+    df = df.sort_index()
+    df = df[-365:]
 
     df['ma5'] = df['close'].rolling(window=5).mean()                # 5일 이동평균 컬럼
     df['ma5_shift1'] = df['ma5'].shift(1)                           # 5일 이동평균 컬럼에서 하나씩 내림

@@ -3,7 +3,7 @@
 # Larry Williams Volatility Breakout Strategy + Moving Average
 #----------------------------------------------------------------------------------------------------------------------
 # A version
-#
+# V1.0 : 헤이비트 변동성 돌파전략 Advanced 1.0 적용 (타임프레임 분산은 미적용)
 #----------------------------------------------------------------------------------------------------------------------
 import pybithumb
 import time
@@ -11,6 +11,12 @@ import datetime
 import logging
 import logging.handlers
 import os
+import telepot
+from telepot.loop import MessageLoop
+import numpy as np
+from dateutil.relativedelta import relativedelta
+
+# token = "720861567:AAGxAJ463C5hrHMAA0RzYvjbOjdwFf1jCzM"
 
 MIN_ORDERS = {"BTC": 0.001, "ETH": 0.01, "DASH": 0.01, "LTC": 0.01, "ETC": 0.1, "XRP": 10, "BCH": 0.001,
               "XMR": 0.01, "ZEC": 0.01, "QTUM": 0.1, "BTG": 0.1, "EOS": 0.1, "ICX": 1, "VEN": 1, "TRX": 100,
@@ -25,11 +31,14 @@ MIN_ORDERS = {"BTC": 0.001, "ETH": 0.01, "DASH": 0.01, "LTC": 0.01, "ETC": 0.1, 
 INTERVAL = 1                                        # 매수 시도 interval (1초 기본)
 DEBUG = False                                       # True: 매매 API 호출 안됨, False: 실제로 매매 API 호출
 
-COIN_NUMS = 10                                      # 분산 투자 코인 개수 (자산/COIN_NUMS를 각 코인에 투자)
+COIN_NUMS = 20                                      # 분산 투자 코인 개수 (자산/COIN_NUMS를 각 코인에 투자)
+MOVING_AVERAGE_DURATION = 20                         # 이동평균 기간
 
-GAIN = 0.3                                          # 30% 이상 이익시 50% 물량 익절
 TARGET_VOLATILITY = 2                               # 타겟 변동성 (%)
 
+BALANCE = 1.0                                       # 자산의 투자비율 (0.0~1.0)
+TRAILLING_STOP_MIN_PROOFIT = 0.4                    # 최소 40% 이상 수익이 발생한 경우에 Traillig Stop 동작
+TRAILLING_STOP_GAP = 0.10                           # 최고점 대비 10% 하락시 매도
 
 #----------------------------------------------------------------------------------------------------------------------
 # Logging
@@ -37,17 +46,7 @@ TARGET_VOLATILITY = 2                               # 타겟 변동성 (%)
 logger = logging.getLogger("logger")
 logger.setLevel(logging.DEBUG)
 
-try:
-    if not(os.path.isdir('logs')):
-        os.makedirs(os.path.join('logs'))
-except:
-    pass
-
-file_handler = logging.handlers.RotatingFileHandler("logs/log_advanced.txt", maxBytes=100 * 1000000, backupCount=5)
-stream_handler = logging.StreamHandler()
-logger.addHandler(file_handler)
-logger.addHandler(stream_handler)
-
+# bot = telepot.Bot(token)
 
 # Load account
 with open("flag/bithumb.txt") as f:
@@ -55,6 +54,25 @@ with open("flag/bithumb.txt") as f:
     key = lines[0].strip()
     secret = lines[1].strip()
     bithumb = pybithumb.Bithumb(key, secret)
+
+def run_volatility_breakout(ticker):
+#    time_duration = (datetime.datetime.now()-relativedelta(months=1)).strftime('%Y-%m')
+    df = pybithumb.get_ohlcv(ticker)
+#    df = df[time_duration]                                          # 일봉 중 지난 1개월
+    df = df.sort_index()
+    df = df[-50:]
+
+    df['ma'] = df['close'].rolling(window=MOVING_AVERAGE_DURATION).mean()              # 20일 이동평균 컬럼
+    df['ma_shift'] = df['ma'].shift(1)                         # 20일 이동평균 컬럼에서 하나씩 내림
+    df['bull'] = df['open'] > df['ma_shift']                     # 상승장/하락장 판단
+
+    df['volatility'] = (df['high'] - df['low']) * 0.5               # 변동성 * 0.5
+    df['target'] = df['open'] + df['volatility'].shift(1)           # 목표가 = 시가 + 전일 변동성 * 0.5
+    df['er'] = np.where(df['bull'] & (df['high'] >= df['target']),  # 매수 조건
+                        df['close'] / df['target'],                 # 매수시 수익률 (매도가/매수가)
+                        1)                                          # 홀드시 수익률
+    df['cumprod'] = df['er'].cumprod()
+    return df['cumprod'][-2]
 
 def make_sell_times(now):
     '''
@@ -71,14 +89,14 @@ def make_sell_times(now):
     sell_time_after_10secs = sell_time + datetime.timedelta(seconds=10)
     return sell_time, sell_time_after_10secs
 
-
 def make_setup_times(now):
     '''
-    익일 00:01:00 시각과 00:01:10초를 만드는 함수
+    다음날 00:01:00 시각과 00:01:10초를 만드는 함수
     :param now:
     :return:
     '''
     tomorrow = now + datetime.timedelta(1)
+#    tomorrow = now
     setup_time = datetime.datetime(year=tomorrow.year,
                                    month=tomorrow.month,
                                    day=tomorrow.day,
@@ -87,7 +105,6 @@ def make_setup_times(now):
                                    second=0)
     setup_time_after_10secs = setup_time + datetime.timedelta(seconds=10)
     return setup_time, setup_time_after_10secs
-
 
 def inquiry_cur_prices(tickers):
     '''
@@ -103,32 +120,88 @@ def inquiry_cur_prices(tickers):
         logger.info("inquiry_cur_prices error: {}".format(e))
         return None
 
+def set_tickers_to_trade():
+    global COIN_NUMS
+    global BALANCE
+    global MOVING_AVERAGE_DURATION
+
+    result_list = []
+    try:
+        with open("flag/coinnum.txt") as c:
+            lines = c.readlines()
+            coins = lines[0].strip()
+            COIN_NUMS = int(coins)
+
+        with open("flag/balance.txt") as b:
+            lines = b.readlines()
+            rate = lines[0].strip()
+            BALANCE = float(rate)
+
+        with open("flag/moving_average_duration.txt") as b:
+            lines = b.readlines()
+            rate = lines[0].strip()
+            MOVING_AVERAGE_DURATION = int(rate)
+
+        # 거래 코인수 읽어오기 - 동적변화를 위함
+        # 추후 자산량 변화에 따라 자동으로 변화하도록 로직 구현
+        # (자산이 많아지면 코인종류를 늘려 코인별 비중 축소)
+        tickers = get_tickers()
+        result = []
+
+        for ticker in tickers:
+            try:
+                earning_rate = run_volatility_breakout(ticker)
+                result.append((ticker, earning_rate))
+            except:
+                pass
+
+        # 정렬
+        ranked_data = sorted(result, key=lambda x:x[1], reverse=True)
+        leng = min(len(ranked_data), int(COIN_NUMS * 2))
+        with open("flag/ticker_list.txt", "w") as f:
+            for data in ranked_data[:leng]:
+                if float(data[1]) >= 1.0:
+                    result_list.append(data[0])
+                    f.write("{}\n".format(data[0]))
+
+    except Exception as e:
+        logger.info("Set Ticker Error : {}".format(e))
+
+    return result_list
 
 def get_tickers():
     tickers = pybithumb.get_tickers()
+#    all = pybithumb.get_current_price("ALL")
+#    tickers = [k for k, v in all.items() if isinstance(v, dict)]
+    buy_ticker_list = []
+
     try:
         tickers.remove('date')
     except:
         pass
-    try:
-        tickers.remove('TRUE')
-    except:
-        pass
-    try:
-        tickers.remove('FALSE')
-    except:
-        pass
+
+#    all_tickers = []
+
+#    try:
+#        with open('flag/ticker_list.txt') as f:
+#            lines = f.readlines()
+#            for line in lines:
+#                buy_tickers.append(line.strip('\n'))
+#    except:
+#        pass
 
     try:
         for ticker in tickers:
+#            all_tickers.append(ticker)
             df = pybithumb.get_ohlcv(ticker)
             if (len(df) < 2):
                 tickers.remove(ticker)
+#            elif ticker not in buy_ticker_list:
+#                tickers.remove(ticker)
     except Exception as e:
         logger.info("ticker error : {}".format(e))
-        
-    return tickers
 
+    return tickers
 
 def cal_noise(tickers, window=20):
     '''
@@ -154,7 +227,6 @@ def cal_noise(tickers, window=20):
         logger.info("cal_noise error : {}".format(e))
         return None
 
-
 def cal_target(ticker, noises):
     '''
     각 코인에 대한 목표가 계산
@@ -175,7 +247,6 @@ def cal_target(ticker, noises):
         logger.info("cal_target error {}".format(ticker))
         return None, None
 
-
 def inquiry_high_prices(tickers):
     try:
         high_prices = {}
@@ -189,7 +260,6 @@ def inquiry_high_prices(tickers):
         logger.info("inquiry_high_prices error")
         return  {ticker:0 for ticker in tickers}
 
-
 def inquiry_targets(tickers, noises):
     '''
     모든 코인에 대한 목표가 계산
@@ -198,11 +268,12 @@ def inquiry_targets(tickers, noises):
     '''
     targets = {}
     yesterday_diff = {}
-    
+
     for ticker in tickers:
         targets[ticker], yesterday_diff[ticker] = cal_target(ticker, noises)
     return targets, yesterday_diff
-    
+
+# 최근 상승비율에 따른 매수비율 계산 (현재 미사용)
 def cal_buy_ratio(ticker, target, yesterday_diff, sell_price):
     try:
         score = 0
@@ -212,15 +283,14 @@ def cal_buy_ratio(ticker, target, yesterday_diff, sell_price):
                     score += 1
             except:
                 pass
-            
+
         yesterday_volatility = yesterday_diff * 100.0 / float(sell_price)
-    
+
         ratio = (score / 18) * (TARGET_VOLATILITY / yesterday_volatility)
         return ratio
     except Exception as e:
         logger.info("cal_buy_ratio error : {}".format(e))
         return 0
-
 
 def cal_moving_average(ticker="BTC", window=5):
     '''
@@ -239,7 +309,6 @@ def cal_moving_average(ticker="BTC", window=5):
         logger.info("cal_moving_average error")
         return None
 
-
 def inquiry_moving_average(tickers):
     '''
     모든 코인에 대해 5일 이동평균값을 계산
@@ -248,10 +317,9 @@ def inquiry_moving_average(tickers):
     '''
     mas = {}
     for ticker in tickers:
-        ma = cal_moving_average(ticker)
+        ma = cal_moving_average(ticker, MOVING_AVERAGE_DURATION)
         mas[ticker] = ma
     return mas
-
 
 def try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, high_prices, yesterday_diff, now):
     '''
@@ -286,22 +354,31 @@ def try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, hi
                     orderbook = pybithumb.get_orderbook(ticker)
                     asks = orderbook['asks']
                     sell_price = asks[0]['price']
-                    buy_ratio = cal_buy_ratio(ticker, targets[ticker], yesterday_diff[ticker], sell_price)
-                    unit = (budget_per_coin / float(sell_price)) * buy_ratio
+#                    buy_ratio = cal_buy_ratio(ticker, targets[ticker], yesterday_diff[ticker], sell_price)
+#                    unit = (budget_per_coin / float(sell_price)) * buy_ratio
+                    unit = budget_per_coin / float(sell_price)
                     min_order = MIN_ORDERS.get(ticker, 0.001)
-                    
+
                     if unit >= min_order:
-                        logger.info("BUY [{}] {} {} - MIN : {}".format(now.strftime("%Y-%m-%d %H:%M:%S"), ticker, unit, min_order))
+                        buy_ret = 'check'
                         if DEBUG is False:
-                            bithumb.buy_market_order(ticker, unit)
+                            logger.info("BUY [{}] {} {} - MIN : {}".format(now.strftime("%Y-%m-%d %H:%M:%S"), ticker, unit, min_order))
+                            buy_ret = bithumb.buy_market_order(ticker, unit)
+                            logger.info("BUY Result : {}".format(buy_ret))
+
+#                            try:
+#                                bot = telepot.Bot(token)
+#                                bot.sendMessage(348034499, "Buy {} {}".format(ticker, unit))
+#                            except:
+#                                pass
                         else:
                             logger.info("BUY API CALLED {} {}".format(ticker, unit))
                         time.sleep(INTERVAL)
-                        holdings[ticker] = True
+                        if buy_ret != 'None':
+                            holdings[ticker] = True
     except Exception as e:
         logger.info("try buy error : {} - {}".format(tmp, e))
         pass
-
 
 def retry_sell(ticker, unit, retry_cnt=10):
     '''
@@ -324,7 +401,6 @@ def retry_sell(ticker, unit, retry_cnt=10):
     except:
         pass
 
-
 def try_sell(tickers):
     '''
     보유하고 있는 모든 코인에 대해 전량 매도
@@ -338,18 +414,21 @@ def try_sell(tickers):
 
             if unit >= min_order:
                 if DEBUG is False:
-                    ret = bithumb.sell_market_order(ticker, unit)
-                    time.sleep(INTERVAL)
-                    if ret is None:
-                        retry_sell(ticker, unit, 10)
+                    try:
+                        ret = bithumb.sell_market_order(ticker, unit)
+                        time.sleep(INTERVAL)
+                        if ret is None:
+                            retry_sell(ticker, unit, 10)
+                    except Exception as e:
+                        logger.info("try_sell error : {}".format(ticker))
+                        pass
                 else:
                     logger.info("SELL API CALLED {} {}".format(ticker, unit))
     except Exception as e:
         logger.info("try_sell error : {}".format(e))
         pass
 
-
-def try_profit_cut(tickers, prices, targets, holdings, now):
+def try_profit_cut(tickers, prices, targets, holdings, high_prices, now):
     '''
     trailling stop
     :param tickers: 티커 리스트
@@ -364,12 +443,15 @@ def try_profit_cut(tickers, prices, targets, holdings, now):
             tmp = ticker
             price = prices[ticker]                          # 현재가
             target = targets[ticker]                        # 매수가
+            high_price = high_prices[ticker]                # 당일 최고가
             gain = (price - target) / target                # 이익률: (매도가-매수가)/매수가
 
             if holdings[ticker] is True:
-                if gain >= GAIN:
-                    unit = bithumb.get_balance(ticker)[0] / 2   # 50% 물량 매도
+                if (gain >= TRAILLING_STOP_MIN_PROOFIT) or (gain <= -TRAILLING_STOP_GAP):
+                    unit = bithumb.get_balance(ticker)[0]
                     min_order = MIN_ORDERS.get(ticker, 0.001)
+                    if gain >= TRAILLING_STOP_MIN_PROOFIT:
+                        unit = unit / 2
 
                     if unit >= min_order:
                         if DEBUG is False:
@@ -381,10 +463,11 @@ def try_profit_cut(tickers, prices, targets, holdings, now):
                                 holdings[ticker] = False
                         else:
                             logger.info("Trailing Stop {} {}".format(ticker, unit))
-    except Exception as e:
-        logger.info("try_trailing_stop error : {} - {}".format(tmp, e))
-        pass
 
+#                        holdings[ticker] = False
+    except Exception as e:
+#        logger.info("try_trailing_stop error : {} - {}".format(tmp, e))
+        pass
 
 def cal_budget():
     '''
@@ -393,11 +476,11 @@ def cal_budget():
     '''
     try:
         krw_balance = bithumb.get_balance("BTC")[2]
+        krw_balance = krw_balance * BALANCE
         budget_per_coin = int(krw_balance / COIN_NUMS)
         return budget_per_coin
     except:
         return 0
-
 
 def update_high_prices(tickers, high_prices, cur_prices):
     '''
@@ -416,7 +499,6 @@ def update_high_prices(tickers, high_prices, cur_prices):
     except:
         pass
 
-
 def print_status(now, tickers, targets, holdings):
     '''
     현재 상태를 출력
@@ -429,6 +511,8 @@ def print_status(now, tickers, targets, holdings):
     :param high_prices: 당일 고가 리스트
     :return:
     '''
+    ticker_list = tickers
+    hold_list = holdings
     try:
         cnt = 0
         nameList = ''
@@ -442,7 +526,6 @@ def print_status(now, tickers, targets, holdings):
     except Exception as e:
         logger.info("print_status error: {}".format(e))
         pass
-        
 
 def set_trade():
     noises = None
@@ -454,35 +537,111 @@ def set_trade():
         targets, yesterday_diff = inquiry_targets(tickers, noises)          # 코인별 목표가 계산
     mas = inquiry_moving_average(tickers)                                   # 코인별로 5일 이동평균 계산
     budget_per_coin = cal_budget()                                          # 코인별 최대 배팅 금액 계산
-    
+
     holdings = {ticker:False for ticker in tickers}                       # 보유 상태 초기화
-    
+
     return noises, targets, yesterday_diff, mas, budget_per_coin, holdings
 
+# Telegram 에서 보유중인 코인 요청시 응답 기능
+# DB와 연동후 별도로 뺄 예정
+def handle(msg):
+    content_type, chat_type, chat_id = telepot.glance(msg)
+    if content_type == 'text':
+        text = msg['text']
+        cmd = text[:-6]
+
+        if '조회' in cmd:
+            cnt = 0
+            nameList = ''
+
+            for ticker in ticker_list:
+                if hold_list[ticker] == True:
+                    cnt += 1
+                    nameList = nameList + ticker + ','
+
+            chat = "보유수 : {:2} / 보유리스트 : {}".format(cnt, nameList[:-1])
+            bot.sendMessage(chat_id, chat)
 
 #----------------------------------------------------------------------------------------------------------------------
 # 매매 알고리즘 시작
 #---------------------------------------------------------------------------------------------------------------------
-now = datetime.datetime.now()                                           # 현재 시간 조회
-sell_time1, sell_time2 = make_sell_times(now)                           # 초기 매도 시간 설정
-setup_time1, setup_time2 = make_setup_times(now)                        # 초기 셋업 시간 설정
+ticker_list = {}
+hold_list = {}
+start_day_flag = False
 
+now = datetime.datetime.now()                                           # 현재 시간 조회
+tomorrow = now + datetime.timedelta(1)
+#----------------------------------------------------------------------------------------------------------------------
+# Logging Start
+#----------------------------------------------------------------------------------------------------------------------
+try:
+    if not(os.path.isdir('logs')):
+        os.makedirs(os.path.join('logs'))
+    if not(os.path.isdir('logs/{}'.format(now.strftime('%Y')))):
+        os.makedirs(os.path.join('logs/{}'.format(now.strftime('%Y'))))
+    if not(os.path.isdir('logs/{}/{}'.format(now.strftime('%Y'), now.strftime('%m')))):
+        os.makedirs(os.path.join('logs/{}/{}'.format(now.strftime('%Y'), now.strftime('%m'))))
+except Exception:
+    pass
+
+file_handler = logging.handlers.RotatingFileHandler("logs/{}/{}/log_{}.txt".format(now.strftime('%Y'),
+                                                                                   now.strftime('%m'),
+                                                                                   now.strftime('%Y%m%d')),
+                                                    maxBytes=100 * 1000000, backupCount=5)
+stream_handler = logging.StreamHandler()
+logger.addHandler(file_handler)
+logger.addHandler(stream_handler)
+
+
+sell_time1, sell_time2 = make_sell_times(now)                           # 초기 매도 시간 설정
+#setup_time1, setup_time2 = make_setup_times(now)                        # 초기 셋업 시간 설정
+
+set_tickers_to_trade()
 tickers = get_tickers()                                       # 티커 리스트 얻기
 
 noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade()
 high_prices = inquiry_high_prices(tickers)                              # 코인별 당일 고가 저장
+
+#MessageLoop(bot, handle).run_as_thread()
 
 while True:
     now = datetime.datetime.now()
 
     # 당일 청산 (23:50:00 ~ 23:50:10)
     if sell_time1 < now < sell_time2:
-        try_sell(tickers)                                                    # 각 가상화폐에 대해 매도 시도
+        logger.info("===== Sell Ticker : {} =====".format(now))
+        tomorrow = now + datetime.timedelta(1)
         holdings = {ticker:True for ticker in tickers}                     # 당일에는 더 이상 매수되지 않도록
+        try_sell(tickers)                                                    # 각 가상화폐에 대해 매도 시도
+
         time.sleep(10)
 
+        start_day_flag = True
     # 새로운 거래일에 대한 데이터 셋업 (00:01:00 ~ 00:01:10)
-    if setup_time1 < now < setup_time2:
+#    elif setup_time1 < now < setup_time2:
+    elif start_day_flag:
+        # ----------------------------------------------------------------------------------------------------------------------
+        # Logging Start
+        # ----------------------------------------------------------------------------------------------------------------------
+        try:
+            if not (os.path.isdir('logs')):
+                os.makedirs(os.path.join('logs'))
+            if not(os.path.isdir('logs/{}'.format(now.strftime('%Y')))):
+                os.makedirs(os.path.join('logs/{}'.format(now.strftime('%Y'))))
+            if not(os.path.isdir('logs/{}/{}'.format(now.strftime('%Y'), now.strftime('%m')))):
+                os.makedirs(os.path.join('logs/{}/{}'.format(now.strftime('%Y'), now.strftime('%m'))))
+        except Exception:
+            pass
+
+        file_handler = logging.handlers.RotatingFileHandler("logs/{}/{}/log_{}.txt".format(tomorrow.strftime('%Y'),
+                                                                                           tomorrow.strftime('%m'),
+                                                                                           tomorrow.strftime('%Y%m%d')),
+                                                            maxBytes=100 * 1000000, backupCount=5)
+        stream_handler = logging.StreamHandler()
+        logger.addHandler(file_handler)
+        logger.addHandler(stream_handler)
+
+        logger.info("===== Start New Trade : {} =====".format(now))
         tickers = get_tickers()                                   # 티커 목록 갱신
 
         try_sell(tickers)                                                   # 매도 되지 않은 코인에 대해서 한 번 더 매도 시도
@@ -490,33 +649,26 @@ while True:
         noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade()
 
         sell_time1, sell_time2 = make_sell_times(now)                       # 당일 매도 시간 갱신
-        setup_time1, setup_time2 = make_setup_times(now)                    # 다음 거래일 셋업 시간 갱신
+#        setup_time1, setup_time2 = make_setup_times(now)                    # 다음 거래일 셋업 시간 갱신
 
         high_prices = {ticker: 0 for ticker in tickers}                    # 코인별 당일 고가 초기화
 
-        # 거래 코인수 읽어오기 - 동적변화를 위함
-        # 추후 자산량 변화에 따라 자동으로 변화하도록 로직 구현 
-        # (자산이 많아지면 코인종류를 늘려 코인별 비중 축소)
-        try:
-            with open("flag/coinnum.txt") as c:
-                lines = c.readlines()
-                coins = lines[0].strip()
-                COIN_NUMS = int(coins)
-        except:
-            pass
+        set_tickers_to_trade()
+        holdings = {ticker:False for ticker in tickers}
 
-        time.sleep(10)
+        start_day_flag = False
+    else:
+        # 현재가 조회
+        prices = inquiry_cur_prices(tickers)
+        update_high_prices(tickers, high_prices, prices)
+        print_status(now, tickers, targets, holdings)
 
-    # 현재가 조회
-    prices = inquiry_cur_prices(tickers)
-    update_high_prices(tickers, high_prices, prices)
-    print_status(now, tickers, targets, holdings)
-
-    if prices is not None:
-        # 매수
-        try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, high_prices, yesterday_diff, now)
-        # 익절
-        try_profit_cut(tickers, prices, targets, holdings, now)
+        if prices is not None:
+            # 매수
+            try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, high_prices, yesterday_diff, now)
+            # 손절/익절
+            try_profit_cut(tickers, prices, targets, holdings, high_prices, now)
 
     time.sleep(INTERVAL)
+
 
