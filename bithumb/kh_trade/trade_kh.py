@@ -444,9 +444,25 @@ def cal_budget():
     :return: 원화잔고/투자 코인 수
     '''
     try:
+        now = datetime.datetime.now()
+
         krw_balance = bithumb.get_balance("BTC")[2]
         krw_balance = krw_balance * BALANCE
         budget_per_coin = int(krw_balance / COIN_NUMS)
+
+        try:
+            if not (os.path.isdir('balance_logs/')):
+                os.makedirs(os.path.join('balance_logs'))
+            if not (os.path.isdir('balance_logs/{}'.format(now.strftime('%Y')))):
+                os.makedirs(os.path.join('balance_logs/{}'.format(now.strftime('%Y'))))
+
+            with open("balance_logs/{}/balance_{}.txt".format(now.strftime('%Y'),
+                                                              now.strftime('%m')),
+                      "a") as fname:
+                fname.write("{}\t{}\n".format(now.strftime('%Y%m%d'), krw_balance))
+        except Exception:
+            pass
+
         return budget_per_coin
     except:
         return 0
@@ -614,5 +630,4 @@ while True:
             try_profit_cut(tickers, prices, targets, holdings, high_prices, now)
 
     time.sleep(INTERVAL)
-
 
