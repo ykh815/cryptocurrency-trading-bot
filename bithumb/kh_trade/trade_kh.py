@@ -438,13 +438,15 @@ def try_profit_cut(tickers, prices, targets, holdings, high_prices, now):
         logger.info("try_trailing_stop error : {} - {}".format(tmp, e))
         pass
 
-def cal_budget():
+def cal_budget(new_day_flag):
     '''
     한 코인에 대해 투자할 투자 금액 계산
     :return: 원화잔고/투자 코인 수
     '''
     try:
         now = datetime.datetime.now()
+        if new_day_flag:
+            now = datetime.datetime.now() + datetime.timedelta(1)
 
         krw_balance = bithumb.get_balance("BTC")[2]
         krw_balance = krw_balance * BALANCE
@@ -512,7 +514,7 @@ def print_status(now, tickers, targets, holdings):
         logger.info("print_status error: {}".format(e))
         pass
 
-def set_trade():
+def set_trade(new_day_flag):
     noises = None
     while noises is None:
         noises = cal_noise(tickers)
@@ -521,9 +523,9 @@ def set_trade():
     while targets is None:
         targets, yesterday_diff = inquiry_targets(tickers, noises)          # 코인별 목표가 계산
     mas = inquiry_moving_average(tickers)                                   # 코인별로 5일 이동평균 계산
-    budget_per_coin = cal_budget()                                          # 코인별 최대 배팅 금액 계산
+    budget_per_coin = cal_budget(new_day_flag)                              # 코인별 최대 배팅 금액 계산
 
-    holdings = {ticker:False for ticker in tickers}                       # 보유 상태 초기화
+    holdings = {ticker:False for ticker in tickers}                         # 보유 상태 초기화
 
     return noises, targets, yesterday_diff, mas, budget_per_coin, holdings
 
@@ -563,7 +565,7 @@ sell_time1, sell_time2 = make_sell_times(now)                           # 초기
 set_tickers_to_trade()
 tickers = get_tickers()                                       # 티커 리스트 얻기
 
-noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade()
+noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade(False)
 high_prices = inquiry_high_prices(tickers)                              # 코인별 당일 고가 저장
 
 while True:
@@ -607,7 +609,7 @@ while True:
 
         try_sell(tickers)                                                   # 매도 되지 않은 코인에 대해서 한 번 더 매도 시도
 
-        noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade()
+        noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade(True)
 
         sell_time1, sell_time2 = make_sell_times(now)                       # 당일 매도 시간 갱신
 
