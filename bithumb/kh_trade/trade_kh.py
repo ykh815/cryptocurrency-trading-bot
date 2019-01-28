@@ -600,6 +600,9 @@ while True:
                                                                                            tomorrow.strftime('%m'),
                                                                                            tomorrow.strftime('%Y%m%d')),
                                                             maxBytes=100 * 1000000, backupCount=5)
+        logger = logging.getLogger("logger")
+        logger.setLevel(logging.DEBUG)
+
         stream_handler = logging.StreamHandler()
         logger.addHandler(file_handler)
         logger.addHandler(stream_handler)
