@@ -17,7 +17,7 @@ import numpy as np
 from dateutil.relativedelta import relativedelta
 
 MIN_ORDERS = {"BTC": 0.001, "ETH": 0.01, "DASH": 0.01, "LTC": 0.01, "ETC": 0.1, "XRP": 10, "BCH": 0.001,
-              "XMR": 0.01, "ZEC": 0.01, "QTUM": 0.1, "BTG": 0.1, "EOS": 0.1, "ICX": 1, "VEN": 1, "TRX": 100,
+              "XMR": 0.01, "ZEC": 0.1, "QTUM": 0.1, "BTG": 0.1, "EOS": 0.1, "ICX": 1, "VEN": 1, "TRX": 100,
               "ELF": 10, "MITH": 10, "MCO": 10, "OMG": 0.1, "KNC": 1, "GNT": 10, "HSR": 1, "ZIL": 100,
               "ETHOS": 1, "PAY": 1, "WAX": 10, "POWR": 10, "LRC": 10, "GTO": 10, "STEEM": 10, "STRAT": 1,
               "ZRX": 1, "REP": 0.1, "AE": 1, "XEM": 10, "SNT": 10, "ADA": 10, "PPT": 1, "CTXC": 10,
@@ -590,14 +590,15 @@ while True:
     # 당일 청산 (23:50:00 ~ 23:50:10)
     if sell_time1 < now < sell_time2:
         logger.info("===== Sell Ticker : {} =====".format(now))
+
         tomorrow = now + datetime.timedelta(1)
-        holdings = {ticker:True for ticker in tickers}                     # 당일에는 더 이상 매수되지 않도록
-        try_sell(tickers)                                                    # 각 가상화폐에 대해 매도 시도
+        sell_time1, sell_time2 = make_sell_times(tomorrow)                     # 당일 매도 시간 갱신
+        holdings = {ticker:True for ticker in tickers}                         # 당일에는 더 이상 매수되지 않도록
+        try_sell(tickers)                                                      # 각 가상화폐에 대해 매도 시도
 
         time.sleep(10)
 
         start_day_flag = True
-    # 새로운 거래일에 대한 데이터 셋업 (00:01:00 ~ 00:01:10)
     elif start_day_flag:
         # ----------------------------------------------------------------------------------------------------------------------
         # Logging Start
@@ -608,8 +609,6 @@ while True:
         try_sell(tickers)                                                   # 매도 되지 않은 코인에 대해서 한 번 더 매도 시도
 
         noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade(True)
-
-        sell_time1, sell_time2 = make_sell_times(now)                       # 당일 매도 시간 갱신
 
         high_prices = {ticker: 0 for ticker in tickers}                    # 코인별 당일 고가 초기화
 
