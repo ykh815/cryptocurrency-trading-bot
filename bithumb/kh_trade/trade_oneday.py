@@ -18,6 +18,8 @@ from telepot.loop import MessageLoop
 import numpy as np
 from dateutil.relativedelta import relativedelta
 
+token = "720861567:AAGxAJ463C5hrHMAA0RzYvjbOjdwFf1jCzM"
+
 MIN_ORDERS = {"BTC": 0.001, "ETH": 0.01, "DASH": 0.1, "LTC": 0.1, "ETC": 0.1, "XRP": 10, "BCH": 0.001,
               "XMR": 0.1, "ZEC": 0.1, "QTUM": 0.1, "BTG": 0.1, "EOS": 1, "ICX": 1, "VEN": 1, "TRX": 100,
               "ELF": 10, "MITH": 10, "MCO": 10, "OMG": 0.1, "KNC": 1, "GNT": 10, "HSR": 1, "ZIL": 100,
@@ -46,6 +48,8 @@ TRAILLING_STOP_GAP = 0.10                           # 최고점 대비 10% 하�
 #----------------------------------------------------------------------------------------------------------------------
 logger = logging.getLogger("logger")
 logger.setLevel(logging.DEBUG)
+
+bot = telepot.Bot(token)
 
 # Load account
 with open("flag/bithumb.txt") as f:
@@ -353,6 +357,12 @@ def try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, hi
                             logger.info("BUY [{}] {} {} - MIN : {}".format(now.strftime("%Y-%m-%d %H:%M:%S"), ticker, unit, min_order))
                             buy_ret = bithumb.buy_market_order(ticker, unit)
                             logger.info("BUY Result : {}".format(buy_ret))
+
+                            try:
+                                bot = telepot.Bot(token)
+                                bot.sendMessage(348034499, "Buy {} {}".format(ticker, unit))
+                            except:
+                                pass
 
                         else:
                             logger.info("BUY API CALLED {} {}".format(ticker, unit))
