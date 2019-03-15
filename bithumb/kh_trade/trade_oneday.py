@@ -12,6 +12,7 @@ import datetime
 import logging
 import logging.handlers
 import os
+import sys
 import telepot
 from telepot.loop import MessageLoop
 import numpy as np
@@ -559,7 +560,6 @@ def set_trade(new_day_flag):
 #---------------------------------------------------------------------------------------------------------------------
 ticker_list = {}
 hold_list = {}
-start_day_flag = False
 
 now = datetime.datetime.now()                                           # 현재 시간 조회
 tomorrow = now + datetime.timedelta(1)
@@ -596,31 +596,11 @@ while True:
     if sell_time1 < now < sell_time2:
         logger.info("===== Sell Ticker : {} =====".format(now))
 
-        tomorrow = now + datetime.timedelta(1)
-        sell_time1, sell_time2 = make_sell_times(tomorrow)                     # 당일 매도 시간 갱신
         holdings = {ticker:True for ticker in tickers}                         # 당일에는 더 이상 매수되지 않도록
         try_sell(tickers)                                                      # 각 가상화폐에 대해 매도 시도
 
-        time.sleep(10)
+        sys.exit()
 
-        start_day_flag = True
-    elif start_day_flag:
-        # ----------------------------------------------------------------------------------------------------------------------
-        # Logging Start
-        # ----------------------------------------------------------------------------------------------------------------------
-        logger.info("===== Start New Trade : {} =====".format(tomorrow))
-        tickers = get_tickers()                                   # 티커 목록 갱신
-
-        try_sell(tickers)                                                   # 매도 되지 않은 코인에 대해서 한 번 더 매도 시도
-
-        noises, targets, yesterday_diff, mas, budget_per_coin, holdings = set_trade(True)
-
-        high_prices = {ticker: 0 for ticker in tickers}                    # 코인별 당일 고가 초기화
-
-        set_tickers_to_trade()
-        holdings = {ticker:False for ticker in tickers}
-
-        start_day_flag = False
     else:
         # 현재가 조회
         prices = inquiry_cur_prices(tickers)
