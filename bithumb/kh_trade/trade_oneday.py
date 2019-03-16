@@ -357,19 +357,18 @@ def try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, hi
                             logger.info("BUY [{}] {} {} - MIN : {}".format(now.strftime("%Y-%m-%d %H:%M:%S"), ticker, unit, min_order))
                             buy_ret = bithumb.buy_market_order(ticker, unit)
                             logger.info("BUY Result : {}".format(buy_ret))
-
-                            try:
-                                bot = telepot.Bot(token)
-                                bot.sendMessage(348034499, "Buy {} {}".format(ticker, unit))
-                            except:
-                                pass
-
                         else:
                             logger.info("BUY API CALLED {} {}".format(ticker, unit))
                         time.sleep(INTERVAL)
                         if buy_ret != None:
                             if buy_ret != 'None':
                                 holdings[ticker] = True
+
+                                try:
+                                    bot = telepot.Bot(token)
+                                    bot.sendMessage(348034499, "Buy {} {}".format(ticker, unit))
+                                except:
+                                    pass
     except Exception as e:
         logger.info("try buy error : {} - {}".format(tmp, e))
         pass
