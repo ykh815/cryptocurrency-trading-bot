@@ -366,7 +366,8 @@ def try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, hi
 
                                 try:
                                     bot = telepot.Bot(token)
-                                    bot.sendMessage(348034499, "Buy {} {}".format(ticker, unit))
+                                    ret = bot.sendMessage(348034499, "Buy {} {}".format(ticker, unit))
+                                    logger.info("Telegram sent - {}".format(ticker))
                                 except:
                                     pass
     except Exception as e:
