@@ -369,6 +369,7 @@ def try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, hi
                                     ret = bot.sendMessage(348034499, "Buy {} {}".format(ticker, unit))
                                     logger.info("Telegram sent - {}".format(ticker))
                                 except:
+                                    logger.info("Telegram send Error : {}".format(ticker))
                                     pass
     except Exception as e:
         logger.info("try buy error : {} - {}".format(tmp, e))

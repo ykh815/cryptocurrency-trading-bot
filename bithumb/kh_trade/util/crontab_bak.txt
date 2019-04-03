@@ -20,4 +20,6 @@
 # For more information see the manual pages of crontab(5) and cron(8)
 # 
 # m h  dom mon dow   command
-0 15 * * * sh /home/ykh815/daily_trade.sh >> /home/ykh815/tmp/daily.out 2>&1
+0 0 * * * sh /home/ykh815/daily_trade.sh > /home/ykh815/tmp/daily.out 2>&1
+#0 0 * * * sh /home/ykh815/daily_trade.sh
+59 23 * * * sh /home/ykh815/delete_log.sh
