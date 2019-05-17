@@ -39,9 +39,9 @@ MOVING_AVERAGE_DURATION = 20                        # 이동평균 기간
 
 TARGET_VOLATILITY = 2                               # 타겟 변동성 (%)
 
-BALANCE = 1.0                                       # 자산의 투자비율 (0.0~1.0)
-TRAILLING_STOP_MIN_PROOFIT = 0.4                    # 최소 40% 이상 수익이 발생한 경우에 Traillig Stop 동작
-TRAILLING_STOP_GAP = 0.10                           # 최고점 대비 10% 하락시 매도
+BALANCE = 0.8                                       # 자산의 투자비율 (0.0~1.0)
+TRAILLING_STOP_MIN_PROOFIT = 0.4                    # 최소 30% 이상 수익이 발생한 경우에 Traillig Stop 동작
+TRAILLING_STOP_GAP = 0.15                           # 최고점 대비 10% 하락시 매도
 
 #----------------------------------------------------------------------------------------------------------------------
 # Logging
@@ -346,9 +346,10 @@ def try_buy(tickers, prices, targets, noises, mas, budget_per_coin, holdings, hi
                     orderbook = pybithumb.get_orderbook(ticker)
                     asks = orderbook['asks']
                     sell_price = asks[0]['price']
-#                    buy_ratio = cal_buy_ratio(ticker, targets[ticker], yesterday_diff[ticker], sell_price)
-#                    unit = (budget_per_coin / float(sell_price)) * buy_ratio
-                    unit = budget_per_coin / float(sell_price)
+					buy_ratio = 1
+                    # 최근 21일간 상승비율만큼 매수
+                    buy_ratio = cal_buy_ratio(ticker, targets[ticker], yesterday_diff[ticker], sell_price)
+                    unit = (budget_per_coin / float(sell_price)) * buy_ratio
                     min_order = MIN_ORDERS.get(ticker, 0.001)
 
                     if unit >= min_order:
